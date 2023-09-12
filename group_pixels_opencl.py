@@ -7,6 +7,7 @@ import pyopencl as cl
 from PIL import Image
 import sys
 import time
+from typing import Optional
 
 
 _INFILE_FLAG = flags.DEFINE_string(
@@ -50,23 +51,27 @@ SUBSTITUTION_KERNEL_PATH = os.path.join(
 
 
 class Timer:
-    def __init__(self):
+    def __init__(self, stfu=False):
+        self._stfu = stfu  # means "be quiet"
         self._start = time.time()
 
     def msg(self, *args, **kwargs):
+        if self._stfu:
+            return
         if 'file' not in kwargs:
             kwargs['file'] = sys.stderr
         print("Time %.4f" % (time.time() - self._start),
               *args, **kwargs)
 
 
-def _load_program(context: cl.Context, kernel_path: str) -> cl.Program:
+def load_program(context: cl.Context, kernel_path: str) -> cl.Program:
     with open(kernel_path, 'r') as f:
         return cl.Program(context, f.read()).build()
 
 
 # Flag combinations for opencl Buffers.
-# I honestly am not sure what COPY_HOST_PTR means but all the example code uses it.
+# (It seems like using USE_HOST_PTR for large read-only buffers like
+# the pixel data (lab_band_bufs) would be faster, but it's not.)
 READ_WRITE = (cl.mem_flags.READ_WRITE
               | cl.mem_flags.COPY_HOST_PTR)
 READ_ONLY = (cl.mem_flags.READ_ONLY
@@ -76,6 +81,9 @@ WRITE_ONLY = (cl.mem_flags.WRITE_ONLY
 
 
 def _random_priorities(count: int, timer: Timer) -> np.ndarray:
+    # This takes about 1.5 seconds, not as bad as I expected.
+    # Random priorities look waaaay better than my original approach (which you
+    # can try if you comment out the "shuffle" line.)
     priorities = np.array(range(count), dtype=cl.cltypes.int)
     timer.msg("shuffle priorities start")
     np.random.shuffle(priorities)
@@ -100,10 +108,12 @@ def compute_pixel_groups(context: cl.Context,
 
     dimensions_buf = cl.Buffer(context, READ_ONLY,
                                hostbuf=np.array(lab_img.size, dtype=cl.cltypes.int))
+    timer.msg("Making lab band bufs")
     lab_band_bufs = [
         cl.Buffer(context, READ_ONLY, hostbuf=np.array(lab_img.getdata(band=band),
                                                        dtype=cl.cltypes.uchar))
         for band in range(3)]
+    timer.msg("Done making lab band bufs")
     threshold_buf = cl.Buffer(context, READ_ONLY,
                               hostbuf=np.array([threshold], dtype=cl.cltypes.int))
     # Priorities would ideally be randomized but I think that will be slow as heck.
@@ -118,7 +128,7 @@ def compute_pixel_groups(context: cl.Context,
         context, READ_WRITE,
         hostbuf=np.empty(total_size, dtype=cl.cltypes.int))
 
-    grouping_program = _load_program(context, GROUPING_KERNEL_PATH)
+    grouping_program = load_program(context, GROUPING_KERNEL_PATH)
     # Although this uses __getattr__ syntax, accessing .groupPixels (the kernel
     # name) multiple times does cause a new Kernel instance to be created each
     # time. (They were trying to be fancy and made their API bad.)
@@ -147,15 +157,6 @@ def compute_pixel_groups(context: cl.Context,
 
 
 def _image_from_bands(bands: list[np.ndarray], shape: tuple[int, int]) -> Image.Image:
-    # print("bands:", bands)
-    # print([band.shape for band in bands])
-    # thing = [[]]
-    # for rgb in zip(*bands):
-    #     if len(thing[-1]) >= shape[0]:
-    #         thing.append([])
-    #     thing[-1].append(rgb)
-    # return Image.fromarray(np.array(thing, dtype=np.byte), "RGB")
-
     return Image.merge(
         "RGB",
         [Image.fromarray(np.reshape(band, shape[::-1], order="C"), "L")
@@ -165,8 +166,31 @@ def _image_from_bands(bands: list[np.ndarray], shape: tuple[int, int]) -> Image.
 def substitute_pixels(context: cl.Context,
                       queue: cl.CommandQueue,
                       rgb_img: Image.Image,
-                      substitutions: cl.Buffer) -> Image.Image:
-    substitution_program = _load_program(context, SUBSTITUTION_KERNEL_PATH)
+                      substitutions: cl.Buffer,
+                      timer: Optional[Timer] = None) -> Image.Image:
+    """Takes an input RGB image and returns a modified copy.
+
+    Args:
+      context: OpenCL context (used to execute code on GPU).
+      queue: OpenCL execution queue. Should probably not be, like, still running
+        a thing that writes to the `substitutions` buffer?
+      rgb_img: An image in the Red-Green-Blue color space, as a template for the
+        output image.
+      substitutions: Holds an array of length [number-of-pixels-in-rgb_img].
+        Each value is an index into the rgb_img pixel data. The value of pixel i
+        in the output image will be rgb_image.getpixel(substitutions[i]).
+      timer: For debugging, optional.
+
+    Returns:
+      A PIL Image object.
+
+    Raises:
+      Ha. Ha. If indices are out of bounds that's probably undefined behavior.
+    """
+    if timer is None:
+        timer = Timer(stfu=True)
+    timer.msg("Setting up for pixel substitution")
+    substitution_program = load_program(context, SUBSTITUTION_KERNEL_PATH)
     substitution_kernel = substitution_program.substitutePixels
 
     total_size = rgb_img.size[0] * rgb_img.size[1]
@@ -175,6 +199,7 @@ def substitute_pixels(context: cl.Context,
         hostbuf=np.array([total_size], dtype=cl.cltypes.int))
 
     band_out_bufs = []
+    timer.msg("Starting pixel substitution GPU stuff")
     for band_index in range(3):
         band_in_buf = cl.Buffer(
             context, READ_ONLY,
@@ -200,7 +225,7 @@ def substitute_pixels(context: cl.Context,
         cl.enqueue_copy(queue, result, out_buf)
         bands.append(result)
     queue.finish()  # still blocking
-
+    timer.msg("Finished pixel substitution GPU stuff")
     return _image_from_bands(bands, rgb_img.size)
 
 
@@ -227,42 +252,10 @@ def opencl_wackify_image(img: Image.Image,
             context, queue, lab_img, iterations=iterations,
             threshold=threshold,
             timer=timer)
-        return substitute_pixels(context, queue, rgb_img, memberships_buf)
-
-
-def _substitute_noop_image(img: Image.Image) -> Image.Image:
-    """For debugging. It is at time of writing a yes-op."""
-    context = cl.create_some_context()
-    identity_substitutions = cl.Buffer(
-        context, READ_ONLY,
-        hostbuf=np.array(range(img.size[0] * img.size[1]), dtype=cl.cltypes.int))
-    with cl.CommandQueue(context) as queue:
-        return substitute_pixels(context, queue, img, identity_substitutions)
-
-
-def _also_noop(img: Image.Image) -> Image.Image:
-    return _image_from_bands([np.array(img.getdata(band=ix), dtype=cl.cltypes.int) for ix in range(3)],
-                             img.size)
-
-# def pixel_coord_debug(size=(3, 5)) -> np.ndarray:
-#     total_size = size[0] * size[1]
-#     context = cl.create_some_context()
-#     dimensions_buf = cl.Buffer(context, READ_ONLY,
-#                                hostbuf=np.array(size, dtype=cl.cltypes.int))
-#     indices_buf = cl.Buffer(context, WRITE_ONLY,
-#                             hostbuf=np.empty(total_size, dtype=cl.cltypes.int))
-#     prog = _load_program(context, GROUPING_KERNEL_PATH)
-#     debug_kernel = prog.debugConversions
-#     with cl.CommandQueue(context) as queue:
-#         debug_kernel(queue, (total_size,), (1,),
-#                      dimensions_buf, indices_buf).wait()
-#         result = np.empty(total_size, dtype=cl.cltypes.int)
-#         cl.enqueue_copy(queue, result, indices_buf)
-#     print(result)
+        return substitute_pixels(context, queue, rgb_img, memberships_buf, timer)
 
 
 def main(unused_argv):
-    # pixel_coord_debug()
     in_image = Image.open(_INFILE_FLAG.value)
     iterations = _ITERATIONS_FLAG.value
     if iterations is None:
@@ -270,8 +263,6 @@ def main(unused_argv):
 
     out_image = opencl_wackify_image(in_image, iterations,
                                      threshold=_THRESHOLD_FLAG.value)
-    # out_image = _substitute_noop_image(in_image)
-    # out_image = _also_noop(in_image)
 
     if _OUTFILE_FLAG.value is None:
         out_image.show()
