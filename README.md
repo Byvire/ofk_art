@@ -18,6 +18,8 @@ The computation is a bit like running Conway's Game of Life on a GPU, in that
 there's a series of rounds, and in each round, the new value of a pixel is
 determined from the values of its neighboring pixels (and itself).
 
+Is the GPU version fast? Nope, not really. (I may make a better one.)
+
 # How to run
 
 ## Setup
@@ -25,7 +27,7 @@ determined from the values of its neighboring pixels (and itself).
 Install some Python things:
 
 ```shell
-pip3 install absl-py numpy pillow pyopencl`
+pip3 install absl-py numpy pillow pyopencl
 ```
 
 (You really ought to use a virtual environment or something, eg
@@ -51,8 +53,8 @@ Take a look at the flags documentation, or run the scripts with the `--help` fla
 Here are some examples that give nice results. Feel free to muck with the
 settings or use a different photo. (There are three nice ones in `photos/`.)
 
-I admit the two scripts (CPU and GPU) have inconsistent flags, and that I'm
-aware and not fixing it. They're both fine.
+The scripts (CPU and GPU) have inconsistent flags, and I don't plan to fix it.
+They're good enough.
 
 
 ### CPU code
