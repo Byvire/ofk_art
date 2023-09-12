@@ -11,7 +11,7 @@ import time
 from PIL import Image
 from PIL import ImageDraw
 
-from typing import Callable, Iterable, Optional, TypeVar
+from typing import Callable, Iterable, Optional, TypeVar, Union
 
 
 INFILE_FLAG = flags.DEFINE_string(
@@ -58,7 +58,7 @@ COLOR_OUTFILE_FLAG = flags.DEFINE_string(
 # So try that. Also try using the scipy image tools, which can convert formats and do other stuff.
 
 
-def euclid_distance(pt_a: tuple[int | float, ...], pt_b: tuple[int | float, ...]) -> float:
+def euclid_distance(pt_a: tuple[Union[int, float], ...], pt_b: tuple[Union[int, float], ...]) -> float:
     return sum((xa - xb)**2 for xa, xb in zip(pt_a, pt_b))**0.5
 
 
