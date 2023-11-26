@@ -116,7 +116,6 @@ def compute_pixel_groups(context: cl.Context,
     timer.msg("Done making lab band bufs")
     threshold_buf = cl.Buffer(context, READ_ONLY,
                               hostbuf=np.array([threshold], dtype=cl.cltypes.int))
-    # Priorities would ideally be randomized but I think that will be slow as heck.
     priorities_buf = cl.Buffer(
         context, READ_WRITE,
         hostbuf=_random_priorities(total_size, timer))
@@ -140,7 +139,7 @@ def compute_pixel_groups(context: cl.Context,
         if (ix - 1) % 50 == 0:
             timer.msg('on iteration', ix)
         grouping_kernel(queue,
-                        (total_size + (total_size % 128),),  # global size
+                        (total_size + 128 - total_size % 128,),  # global size
                         (128,),  # local size  (must divide global size)
                         dimensions_buf,
                         *lab_band_bufs,
@@ -209,7 +208,7 @@ def substitute_pixels(context: cl.Context,
             context, WRITE_ONLY,
             hostbuf=np.empty(total_size, dtype=cl.cltypes.uchar))
         substitution_kernel(queue,
-                            (total_size + total_size % 128,),  # global size
+                            (total_size + 128 - total_size % 128,),  # global size
                             (128,),  # local size
                             size_buf,
                             substitutions,
@@ -268,7 +267,7 @@ def main(unused_argv):
         out_image.show()
     else:
         try:
-            out_image.save(_OUTFILE_FLAG.value, format='png')
+            out_image.save(_OUTFILE_FLAG.value, format="png")
         except ValueError:
             out_image.show()
             raise

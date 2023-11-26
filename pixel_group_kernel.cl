@@ -1,6 +1,6 @@
 
 int getRowIndex(__global int* dimensions, int pixel_index) {
-  // Converst flat-array index to row number.
+  // Converts flat-array index to row number.
   // dimensions = [width, height].
   // pixel_index is index of a pixel in the flattened image data.
   // pixel_index = row_ix * width + col_ix
