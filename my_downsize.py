@@ -48,9 +48,9 @@ def _image_from_bands(bands: list[np.ndarray], shape: tuple[int, int]) -> Image.
 
 
 READ_ONLY = (cl.mem_flags.READ_ONLY
-             | cl.mem_flags.USE_HOST_PTR)
+             | cl.mem_flags.COPY_HOST_PTR)
 WRITE_ONLY = (cl.mem_flags.WRITE_ONLY
-              | cl.mem_flags.USE_HOST_PTR)
+              | cl.mem_flags.COPY_HOST_PTR)
 
 
 def downscale_image(img: Image.Image,
