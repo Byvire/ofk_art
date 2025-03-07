@@ -4,11 +4,18 @@ Well, a squiggly line.
 
 Usage: python noodlize.py input_image_file > result.svg
 
-The output file may be quite large (e.g. a 30 megabyte svg). So I then recommend running
+You will need to install the dependencies, including
+github.com/Byvire/potato_sauce.
+
+To get the best possible output for a given input image, try messing around
+with the constants in the image_to_points() function.
+
+The output file may be quite large (e.g. a 30 megabyte svg). So I then
+recommend running
 
 rsvg-convert -u result.svg > result.png
 
-At which point you may still have a 20 megabyte PNG file. For better lossless
+At which point you may still have a 30 megabyte PNG file. For better lossless
 compression, try:
 
 optipng result.png
@@ -16,9 +23,6 @@ optipng result.png
 Or for more dramatic but lossy JPG compression, use ImageMagick:
 
 magick convert result.png -quality 10 result.jpg
-
-To get the best possible output for a given input image, try messing around
-with the constants in the image_to_points() function.
 """
 
 
@@ -388,26 +392,8 @@ def delaunay_to_voronoi(
 def _common_voronoi_edge(face0, face1):
     common = set(_polygon_sides(face0)).intersection(
         set(_polygon_sides(face1[::-1])))
-    if len(common) == 1:
-        return common.pop()
-    # Otherwise we have numerical instability from when the voronoi cells were
-    # intersected with the image boundary. One vertex will match exactly, and
-    # the other has a small numerical error, eg 1e-14.
-    shared_vertices = set(face0).intersection(set(face1))
-    assert len(shared_vertices) == 1, (shared_vertices, face0, face1)
-    shared = shared_vertices.pop()
-    del shared_vertices
-    face0_ix = face0.index(shared)
-    face1_ix = face1.index(shared)
-    mag0 = (face0[face0_ix - 1] - face1[(face1_ix + 1) % len(face1)]).magnitude()
-    mag1 = (face0[(face0_ix + 1) % len(face0)] - face1[face1_ix - 1]).magnitude()
-    if mag0 < mag1:
-        assert mag0 < 0.0000001, mag0
-        return (face0[face0_ix - 1], shared)
-    else:
-        assert mag1 < 0.0000001, mag1
-        return (shared, face0[(face0_ix + 1) % len(face0)])
-
+    assert len(common) == 1
+    return common.pop()
 
 
 def _sides_where_line_hits_polygon(
