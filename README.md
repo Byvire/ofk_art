@@ -1,9 +1,12 @@
 # About
 
-This was my little project to learn GPU programming and make weird photo filters.
+I like writing my own photo filters. I keep them all in this repo.
 
-The original idea was to find "clusters" of similarly colored pixels in an image
-and replace each cluster with a solid color.
+### Pixel clustering
+
+The first idea I ever added here is a script that finds "clusters" of similarly
+colored pixels in an image and replaces each cluster with a solid color. I used
+that project to learn GPU programming.
 
 My first attempt at this is in `group_pixels_cpu.py`. It doesn't use the GPU,
 and takes about 200 seconds to process `photos/building.jpg`, depending on the
@@ -16,9 +19,26 @@ how to parallelize the original graph search algorithm, and then lit on the odd
 idea of running simultaneous graph searches from literally every pixel at once.
 The computation is a bit like running Conway's Game of Life on a GPU, in that
 there's a series of rounds, and in each round, the new value of a pixel is
-determined from the values of its neighboring pixels (and itself).
+determined from the values of its neighboring pixels (and itself). With enough
+rounds it converges to have similar output to the CPU algorithm:
 
-Is the GPU version fast? Nope, not really. (I may make a better one.)
+![Modified photo of the Zakim Bridge in Boston. The unobstructed part of the sky has been grouped into three uniformly blue regions, quantizing the gradiant of dark to light blue from the original photo. Between each pair of brown suspension bridge cables, a different solid blue slice of sky shows through. All through the photo, boundaries between different-color regions are well defined, but boundaries between similar-color regions have a disorganized, fractal-like appearance.](/examples/bridge_all_iterations.png)
+
+But if you cut off the GPU algorithm early, you can see squares where the pixel
+groups are still spreading:
+
+![Version of the same bridge photo where groups of like colors are bounded by 800-pixel-wide squares.](/examples/bridge_400_iterations.png)
+
+Is the GPU version faster than the CPU version? Not on my laptop. But on my
+friend's fancy gaming desktop it can do the full bridge photo in 3 seconds.
+
+### Long squiggly line filter
+
+There's also "noodlize.py", which recreates a given image in detail using just
+one long squiggly line. See the docstring on that file for instructions to run
+the script.
+
+![The same bridge photo, but as a black and white image, where all the black ink is one long intricate squiggle.](examples/noodle_bridge.jpg)
 
 # How to run
 
@@ -47,7 +67,7 @@ this prompt go away.
 export PYOPENCL_CTX=
 ```
 
-## Running the scripts
+## Running the "group pixels" scripts
 
 Take a look at the flags documentation, or run the scripts with the `--help` flag.
 Here are some examples that give nice results. Feel free to muck with the
