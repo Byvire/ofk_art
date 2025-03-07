@@ -35,7 +35,8 @@ friend's fancy gaming desktop it can do the full bridge photo in 3 seconds.
 ### Long squiggly line filter
 
 There's also "noodlize.py", which recreates a given image in detail using just
-one long squiggly line. See the docstring on that file for more information.
+one long squiggly line. See the docstring on that file for instructions to run
+the script.
 
 ![The same bridge photo, but as a black and white image, where all the black ink is one long intricate squiggle.](examples/noodle_bridge.jpg)
 
