@@ -2,13 +2,26 @@
 
 Well, a squiggly line.
 
-Usage: python noodlize.py input_image_file > result.svg
+Usage: python noodlize.py --infile=input_image_file > result.svg
 
 You will need to install the dependencies, including
 github.com/Byvire/potato_sauce.
 
 To get the best possible output for a given input image, try messing around
-with the constants in the image_to_points() function.
+with the flags that control how the grayscale image is turned into a point
+cloud. But also consider preprocessing the image, because not all paths to
+grayscale yield the same results.
+
+Note that the default settings cause the squiggle to be most dense in the
+darkest parts of the image, and least dense in the lightest parts. But you can
+invert this by setting --grayscale_most_dense to a lighter value than
+--grayscale_least_dense. For example,
+
+python noodlize.py --infile=my_image.jpg \
+  --grayscale_most_dense=255 \
+  --grayscale_least_dense=0 \
+  --bg_color='#000000' \
+  --squiggle_color='#ffffff' > out.svg
 
 The output file may be quite large (e.g. a 30 megabyte svg). So I then
 recommend running
@@ -20,12 +33,13 @@ compression, try:
 
 optipng result.png
 
-Or for more dramatic but lossy JPG compression, use ImageMagick:
+Or for more substantial but lossy JPG compression, use ImageMagick:
 
 magick convert result.png -quality 10 result.jpg
 """
 
-
+from absl import app
+from absl import flags
 import collections
 import heapq
 import random
@@ -35,6 +49,66 @@ import typing
 from PIL import Image
 
 from potato_sauce import geom  # github.com/Byvire/potato_sauce
+
+
+
+INFILE_FLAG = flags.DEFINE_string(
+    "infile", None, "Input image file.",
+    required=True,
+)
+
+POINTS_ONLY_FLAG = flags.DEFINE_bool(
+    "points_only",
+    False,
+    "Just show the point cloud generated based on grayscale values, and skip "
+    "all other steps. "
+    "This is useful when adjusting parameters to suit a new image.",
+)
+
+BACKGROUND_COLOR_FLAG = flags.DEFINE_string(
+    "bg_color",
+    "#ffffff",
+    "Background color, in CSS format. Default: #ffffff",
+)
+
+SQUIGGLE_COLOR_FLAG = flags.DEFINE_string(
+    "squiggle_color",
+    "#000000",
+    "Squiggle color, in CSS format. Default: #000000",
+)
+
+POINT_DENSITY_FLAG = flags.DEFINE_float(
+    "max_point_density",
+    0.1,
+    "Probability that a 'completely dark' pixel will become a point in the "
+    "random point set that we create. "
+    "(The squiggly line we produce is a path through this random point set.) "
+    "0.1 is reasonable for a medium-res image, e.g. 1024x1024 pixels. "
+    "For higher resolution photos, try lower values like 0.03, and keep an eye "
+    "on the printed 'Point cloud size' debug info, which will be directly "
+    "proportional to this value. A million points is on the high end and will "
+    "take several minutes to triangulate and draw. Default: 0.1"
+)
+
+GRAYSCALE_LIGHTEST_FLAG = flags.DEFINE_integer(
+    "grayscale_least_dense",
+    155,
+    "Grayscale value should correspond to 0% squiggle-density. "
+    "Grayscale values are from 0-255 but you can experiment with values "
+    "outside that range if you want white parts of the input image to be drawn "
+    "as less-dense squiggles rather than as empty space. "
+    "Default: 155",
+)
+
+GRAYSCALE_DARKEST_FLAG = flags.DEFINE_integer(
+    "grayscale_most_dense",
+    0,
+    "Grayscale value that should correspond to maximum squiggle-density. "
+    "Values between this and --grayscale_least_dense will have squiggle-"
+    "density values iterpolated on a cubic scale. Values outside that range "
+    "will be capped to 0% or 100% of --max_point_density. "
+    "Default: 0"
+)
 
 
 def image_to_points(img: Image.Image) -> list[geom.Point]:
@@ -52,32 +126,21 @@ def image_to_points(img: Image.Image) -> list[geom.Point]:
         # higher contrast. For example, for the Zakim Bridge photo, I liked:
         # img = img.convert("LAB").getchannel(2)
     points = []
-    values_seen = set()
+    max_density = POINT_DENSITY_FLAG.value
+    assert 0 < max_density <= 1
     for x in range(img.size[0]):
         for y in range(img.size[1]):
-            blackness = 255 - img.getpixel((x, y))
-            values_seen.add(blackness)
-            # These are good parameters to mess with depending on the image.
-            # For example, for Pizza John, try range_bottom=-100,
-            # range_top=150, and max_density=0.04
-            #
-            # Value we consider 0% dark. It's sometimes reasonable to set this
-            # below 0.
-            range_bottom = 100
-            # Value we consider 100% dark. If an image is pretty bright you
-            # could lower this.
-            range_top = 255
-            # probability that a 100% dark pixel gets added to our point set
-            max_density = 0.1
-            if (random.random() <
-                max_density * min(1, ((max(blackness - range_bottom, 0))
-                                      / (range_top - range_bottom)) ** 3)):
+            grayscale_val = img.getpixel((x, y))
+            fraction_dark = (
+                (grayscale_val - GRAYSCALE_LIGHTEST_FLAG.value)
+                / (GRAYSCALE_DARKEST_FLAG.value - GRAYSCALE_LIGHTEST_FLAG.value))
+            fraction_dark = min(1, max(0, fraction_dark))
+            if (random.random() < max_density * fraction_dark ** 5):
                 # Adding random.random() helps avoid some edge cases caused by
                 # colinear points.
                 points.append(geom.Point(x + random.random() * 0.2,
                                          y + random.random() * 0.2))
     print("Point cloud size:", len(points), file=sys.stderr)
-    # print("values seen:", sorted(values_seen), file=sys.stderr)
     return points
 
 
@@ -419,7 +482,8 @@ def _midpoint(alice: geom.Point, bob: geom.Point) -> geom.Point:
 
 def _squiggly_svg(path: Sequence[geom.Point],
                   voronoi: dict[geom.Point, tuple[geom.Point, ...]],
-                  size: tuple[float, float]) -> str:
+                  size: tuple[float, float],
+                  ) -> str:
 
     start_control_point = path[-1]
     start_edge = _common_voronoi_edge(voronoi[path[-1]], voronoi[path[0]])
@@ -454,8 +518,13 @@ def _squiggly_svg(path: Sequence[geom.Point],
         prev_control_point = control_point
     result = [
         f'<svg width="{size[0]}" height="{size[1]}" xmlns="http://www.w3.org/2000/svg">']
-    result.append('<path d="{}" stroke="black" fill="transparent" />'.format(
-        " ".join(path_commands)))
+    result.append(
+        f'<rect x="0" y="0" width="{size[0]}" height="{size[1]}" '
+        f'fill="{BACKGROUND_COLOR_FLAG.value}" />')
+    result.append('<path d="{}" stroke="{}" fill="transparent" />'.format(
+        " ".join(path_commands),
+        SQUIGGLE_COLOR_FLAG.value,
+    ))
     result.append("</svg>")
     return "\n".join(result)
 
@@ -493,10 +562,17 @@ def _just_the_points(img_path: str):
     img.show()
 
 
-if __name__ == "__main__":
-    _load_and_squiggle_image(sys.argv[1])
-    # _just_the_points(sys.argv[1])
+def main(extra_argv):
+    if len(extra_argv) > 1:
+        raise Exception("Leftover values after flag parsing:", extra_argv[1:])
+    if POINTS_ONLY_FLAG.value:
+        _just_the_points(INFILE_FLAG.value)
+    else:
+        _load_and_squiggle_image(INFILE_FLAG.value)
 
+
+if __name__ == "__main__":
+    app.run(main)
 
 
 # OTHER DEBUGGING STUFF THAT I DID INSTEAD OF UNIT TESTS, heh.
