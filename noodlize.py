@@ -135,7 +135,7 @@ def image_to_points(img: Image.Image) -> list[geom.Point]:
                 (grayscale_val - GRAYSCALE_LIGHTEST_FLAG.value)
                 / (GRAYSCALE_DARKEST_FLAG.value - GRAYSCALE_LIGHTEST_FLAG.value))
             fraction_dark = min(1, max(0, fraction_dark))
-            if (random.random() < max_density * fraction_dark ** 5):
+            if (random.random() < max_density * fraction_dark ** 3):
                 # Adding random.random() helps avoid some edge cases caused by
                 # colinear points.
                 points.append(geom.Point(x + random.random() * 0.2,
@@ -525,6 +525,11 @@ def _squiggly_svg(path: Sequence[geom.Point],
         " ".join(path_commands),
         SQUIGGLE_COLOR_FLAG.value,
     ))
+    # Uncomment for debug voronoi diagram
+    # for face in voronoi.values():
+    #     for a, b in _polygon_sides(face):
+    #         result.append(
+    #             f'<line x1="{a.x}" y1="{a.y}" x2="{b.x}" y2="{b.y}" stroke="#00000077" />')
     result.append("</svg>")
     return "\n".join(result)
 
